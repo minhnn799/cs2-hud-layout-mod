@@ -1,0 +1,14 @@
+/build/
+/dist/
+*.exe
+*.dll
+*.vpk
+*.zip
+*.sha256
+*.log
+*.mdmp
+__pycache__/
+*.pyc
+.vs/
+.env
+*.bak
