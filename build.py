@@ -28,6 +28,26 @@ files['layout/teamselectmenu.vxml']=s
 files['styles/hud_perfstats_basics.vcss']=(base/'styles/hud_perfstats_basics.css').read_text()+'''\n/* Standalone HUD: telemetry follows the kill-feed corner. */
 HudPerfStatsBasics { horizontal-align: left; margin-left: 8px; margin-right: 0px; }
 #fps_row, #net_numbers_basic, #net_numbers_detailed, #trueview_row { horizontal-align: left; }
+#frame_time_label, #net_basic_ping, #problems_label { horizontal-align: left; text-align: left; margin-left: 0px; }
+#fps_row Label { horizontal-align: left; text-align: left; }
+'''
+telemetry=(base/'layout/hud_perfstats_basics.xml').read_text()
+telemetry=telemetry.replace('</styles>', '</styles>\n<scripts><include src="s2r://panorama/scripts/hud_layout_telemetry.vjs" /></scripts>',1)
+files['layout/hud_perfstats_basics.vxml']=telemetry
+files['scripts/hud_layout_telemetry.vjs']='''(function () {
+    var root = $.GetContextPanel();
+    function alignNumbers() {
+        if (!root || !root.IsValid()) return;
+        var ping = root.FindChildTraverse("net_basic_ping");
+        if (ping && ping.IsValid()) {
+            var current = ping.text;
+            var trimmed = current.replace(/^[\\s\\u00a0]+/, "");
+            if (current !== trimmed) ping.text = trimmed;
+        }
+        $.Schedule(0.1, alignNumbers);
+    }
+    alignNumbers();
+})();
 '''
 for rel,s in files.items():
  p=src/'panorama'/rel;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(s)

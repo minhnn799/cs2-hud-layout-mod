@@ -12,6 +12,11 @@ def edit(m):
  b=m[0]
  if m[1]!='CMapEntity':return b
  p=props.get(val(b,'entity_properties'),'')
+ if val(p,'classname') in ('team_select_camera','map_preview_camera_path_node'):
+  # The swapped CT formation retains its asymmetric weapon/pose bounds.
+  # Widen framing by moving the selection camera 32 units backward.
+  origin=list(map(float,val(b,'origin').split()));origin[1]-=32
+  return re.sub(r'("origin" "vector3" ")[^"]+"',lambda x:x[1]+' '.join(map(str,origin))+'"',b)
  if val(p,'classname') not in ('team_select_counterterrorist','team_select_terrorist'):return b
  origin=list(map(float,val(b,'origin').split()));angles=list(map(float,val(b,'angles').split()))
  old=origin[:];origin[0]=2*(-24.7502441406)-origin[0];angles[1]=(180-angles[1])%360
