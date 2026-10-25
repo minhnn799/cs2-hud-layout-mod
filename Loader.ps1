@@ -106,7 +106,7 @@ function Run($action){try{& $action}catch{
  New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
  Add-Content -LiteralPath $log -Value $detail
  if($TestInstallButton){throw}
- [Windows.Forms.MessageBox]::Show($_.Exception.Message,'CS2 HUD Layout 1.3') | Out-Null
+ [Windows.Forms.MessageBox]::Show($_.Exception.Message,'CS2 HUD Layout 1.4') | Out-Null
 }}
 function CloseSession {
  if($script:LaunchedGame -and !$script:LaunchedGame.HasExited){
@@ -139,7 +139,7 @@ if($LaunchRoot){
  exit
 }
 $form=New-Object Windows.Forms.Form
-$form.Text='CS2 HUD Layout 1.3 - standalone';$form.ClientSize=New-Object Drawing.Size(650,190);$form.StartPosition='CenterScreen'
+$form.Text='CS2 HUD Layout 1.4 - standalone';$form.ClientSize=New-Object Drawing.Size(650,190);$form.StartPosition='CenterScreen'
 $folder=New-Object Windows.Forms.TextBox;$folder.SetBounds(15,20,525,25);$folder.Text='D:\SteamLibrary\steamapps\common\Counter-Strike Global Offensive';$form.Controls.Add($folder)
 $browse=New-Object Windows.Forms.Button;$browse.Text='Browse';$browse.SetBounds(550,18,85,28);$browse.Add_Click({$d=New-Object Windows.Forms.FolderBrowserDialog;if($d.ShowDialog() -eq 'OK'){$folder.Text=$d.SelectedPath}});$form.Controls.Add($browse)
 $status=New-Object Windows.Forms.Label;$status.SetBounds(15,110,620,65);$status.Text='Radar right / kill feed left. Team selection: CT left / T right.';$form.Controls.Add($status)
