@@ -1,6 +1,6 @@
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot\..\Loader.ps1" -LibraryOnly
-$fixture=Join-Path ([IO.Path]::GetTempPath()) ('hud-exit-test-'+[Guid]::NewGuid())
+$fixture=Join-Path "$PSScriptRoot\..\build" ('hud-exit-test-'+[Guid]::NewGuid())
 New-Item -ItemType Directory $fixture | Out-Null
 $script:TestPaths=@{root=$fixture;state=$fixture;gi=(Join-Path $fixture 'gameinfo.gi');backup=(Join-Path $fixture 'original.gi');journal=(Join-Path $fixture 'active.json')}
 function Paths {return $script:TestPaths}

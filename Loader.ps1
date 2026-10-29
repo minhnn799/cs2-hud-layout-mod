@@ -4,6 +4,21 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $script:LaunchedGame=$null
 $script:SessionRoot=$null
+$script:FeatureMask=7
+$script:FeatureBoxes=@{}
+$script:SettingsPath=Join-Path $env:LOCALAPPDATA 'CS2HudLayout/features.json'
+try {if([IO.File]::Exists($script:SettingsPath)){$saved=Get-Content $script:SettingsPath -Raw | ConvertFrom-Json;if($saved.mask -ge 0 -and $saved.mask -le 7){$script:FeatureMask=[int]$saved.mask}}} catch {}
+function SelectedFeatures {
+ if($script:FeatureBoxes.Count){$script:FeatureMask=0;foreach($bit in $script:FeatureBoxes.Keys){if($script:FeatureBoxes[$bit].Checked){$script:FeatureMask=$script:FeatureMask -bor [int]$bit}}}
+ # Migrate old separate radar/telemetry selections to the combined option.
+ if($script:FeatureMask -band 3){$script:FeatureMask=$script:FeatureMask -bor 3}
+ return $script:FeatureMask
+}
+function SaveFeatures {
+ $mask=SelectedFeatures
+ New-Item -ItemType Directory -Force (Split-Path $script:SettingsPath) | Out-Null
+ @{mask=$mask} | ConvertTo-Json | Set-Content $script:SettingsPath -Encoding UTF8
+}
 function Hash($p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash }
 function Closed { if(Get-Process cs2 -ErrorAction SilentlyContinue){throw 'Close CS2 before installing or restoring.'} }
 function Paths {
@@ -28,6 +43,8 @@ function Paths {
 }
 function Install {
  Closed; $p=Paths
+ $mask=SelectedFeatures
+ SaveFeatures
  $diag=Join-Path $p.state 'install-trace.log'
  Add-Content $diag "$(Get-Date -Format o) journal=$($p.journal) exists=$(Test-Path -LiteralPath $p.journal)"
  if(-not [IO.File]::Exists($p.journal) -and [IO.File]::ReadAllText($p.gi).Contains('cs2_hud_layout')){
@@ -35,10 +52,12 @@ function Install {
   foreach($archive in [IO.Directory]::GetFiles($p.state,'restored-*.json')){
    $saved=[IO.File]::ReadAllText($archive) | ConvertFrom-Json
    if($saved.modified -ne $current -or (Hash $p.backup) -ne $saved.original){continue}
+   if($saved.sceneTarget){
    if(-not $saved.sceneTarget -or [IO.Path]::GetFullPath($saved.sceneTarget) -ne (Join-Path $p.root 'game\csgo\maps\prefabs\misc\team_select.vpk')){continue}
    if((Hash $saved.sceneBackup) -ne $saved.sceneOriginal){continue}
    $sceneHash=Hash $saved.sceneTarget
    if($sceneHash -ne $saved.sceneOriginal -and $sceneHash -ne $saved.sceneModified){continue}
+   }
    [IO.File]::WriteAllText($p.journal,[IO.File]::ReadAllText($archive))
    Add-Content $diag "Recovered matching journal from $archive"
    break
@@ -55,8 +74,9 @@ function Install {
  if($text -match 'cs2_rebalance_loader'){throw 'The reversed-defusal mod mount is active. Restore that mod first.'}
  if($text -match 'cs2_hud_layout'){throw "HUD Layout is mounted, but its recovery record was not found. Selected root: $($p.root). Recovery folder: $($p.state). Launcher: $PSScriptRoot. Do not delete your backups."}
  if((Test-Path -LiteralPath $p.mod) -and !(Test-Path -LiteralPath (Join-Path $p.mod 'hud-layout-owned.txt'))){throw 'The mod folder already exists and is not owned by this loader.'}
- $vpk=Join-Path $PSScriptRoot 'hud_layout.vpk'
- if((Hash $vpk) -ne (Get-Content (Join-Path $PSScriptRoot 'hud_layout.sha256') -Raw).Trim()){throw 'HUD payload checksum failed.'}
+ if($mask -eq 0){$status.Text='All features disabled. Original layout is active.';return}
+ $vpk=Join-Path $PSScriptRoot ('profiles\'+$mask+'.vpk')
+ if((Hash $vpk) -ne (Get-Content ([IO.Path]::ChangeExtension($vpk,'.sha256')) -Raw).Trim()){throw 'HUD payload checksum failed.'}
  foreach($type in @('Game','Mod')){
   $pattern='(?m)^(\s*'+$type+'\s+)csgo\s*$'
   if([regex]::Matches($text,$pattern).Count -ne 1){throw 'Unsupported gameinfo search paths.'}
@@ -68,18 +88,22 @@ function Install {
  if((Hash $p.gi) -ne (Hash $p.backup)){throw 'Backup verification failed.'}
  $staged=Join-Path $p.state 'gameinfo.modified.gi'
  [IO.File]::WriteAllText($staged,$text,(New-Object Text.UTF8Encoding($false)))
+ $record=@{original=(Hash $p.backup);modified=(Hash $staged);features=$mask}
+ if($mask -band 4){
  $scene=Join-Path $p.root 'game\csgo\maps\prefabs\misc\team_select.vpk'
  $sceneSource=Join-Path $PSScriptRoot 'team_select.vpk'
  if((Hash $sceneSource) -ne (Get-Content (Join-Path $PSScriptRoot 'team_select.sha256') -Raw).Trim()){throw 'Scene payload checksum failed.'}
  $sceneBackup=Join-Path $p.state 'team_select.original.vpk'
  Copy-Item -LiteralPath $scene -Destination $sceneBackup -Force
  if((Hash $scene) -ne (Hash $sceneBackup)){throw 'Scene backup verification failed.'}
- @{original=(Hash $p.backup);modified=(Hash $staged);sceneTarget=$scene;sceneBackup=$sceneBackup;sceneOriginal=(Hash $sceneBackup);sceneModified=(Hash $sceneSource)} | ConvertTo-Json | Set-Content -LiteralPath $p.journal -Encoding UTF8
+  $record.sceneTarget=$scene;$record.sceneBackup=$sceneBackup;$record.sceneOriginal=Hash $sceneBackup;$record.sceneModified=Hash $sceneSource
+ }
+ $record | ConvertTo-Json | Set-Content -LiteralPath $p.journal -Encoding UTF8
  New-Item -ItemType Directory -Force $p.mod | Out-Null
  Set-Content -LiteralPath (Join-Path $p.mod 'hud-layout-owned.txt') -Value 'CS2 HUD Layout'
  Copy-Item -LiteralPath $vpk -Destination (Join-Path $p.mod 'hud_layout.vpk') -Force
  Copy-Item -LiteralPath $staged -Destination $p.gi -Force
- Copy-Item -LiteralPath $sceneSource -Destination $scene -Force
+ if($mask -band 4){Copy-Item -LiteralPath $sceneSource -Destination $scene -Force}
  $script:SessionRoot=$p.root
  $status.Text='Installed. Use Play for local testing. Restore before stock play.'
 }
@@ -106,7 +130,7 @@ function Run($action){try{& $action}catch{
  New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
  Add-Content -LiteralPath $log -Value $detail
  if($TestInstallButton){throw}
- [Windows.Forms.MessageBox]::Show($_.Exception.Message,'CS2 HUD Layout 1.4') | Out-Null
+ [Windows.Forms.MessageBox]::Show($_.Exception.Message,'CS2 HUD Layout 1.6') | Out-Null
 }}
 function CloseSession {
  if($script:LaunchedGame -and !$script:LaunchedGame.HasExited){
@@ -139,16 +163,21 @@ if($LaunchRoot){
  exit
 }
 $form=New-Object Windows.Forms.Form
-$form.Text='CS2 HUD Layout 1.4 - standalone';$form.ClientSize=New-Object Drawing.Size(650,190);$form.StartPosition='CenterScreen'
+$form.Text='CS2 HUD Layout 1.6 - standalone';$form.ClientSize=New-Object Drawing.Size(650,290);$form.StartPosition='CenterScreen'
 $folder=New-Object Windows.Forms.TextBox;$folder.SetBounds(15,20,525,25);$folder.Text='D:\SteamLibrary\steamapps\common\Counter-Strike Global Offensive';$form.Controls.Add($folder)
 $browse=New-Object Windows.Forms.Button;$browse.Text='Browse';$browse.SetBounds(550,18,85,28);$browse.Add_Click({$d=New-Object Windows.Forms.FolderBrowserDialog;if($d.ShowDialog() -eq 'OK'){$folder.Text=$d.SelectedPath}});$form.Controls.Add($browse)
-$status=New-Object Windows.Forms.Label;$status.SetBounds(15,110,620,65);$status.Text='Radar right / kill feed left. Team selection: CT left / T right.';$form.Controls.Add($status)
-$install=New-Object Windows.Forms.Button;$install.Text='Install';$install.SetBounds(15,65,120,30);$install.Add_Click({Run {Install}});$form.Controls.Add($install)
-$play=New-Object Windows.Forms.Button;$play.Text='Play (-insecure)';$play.SetBounds(145,65,150,30);$play.Add_Click({Run {Closed;if(!(Get-Process steam -ErrorAction SilentlyContinue)){throw 'Start Steam first.'};Install;$p=Paths;$script:LaunchedGame=Start-Process -FilePath (Join-Path $p.root 'game\bin\win64\cs2.exe') -ArgumentList '-insecure' -WorkingDirectory $p.root -PassThru;$status.Text='Closing this launcher closes its game and restores originals.'}});$form.Controls.Add($play)
-$restore=New-Object Windows.Forms.Button;$restore.Text='Restore';$restore.SetBounds(305,65,120,30);$restore.Add_Click({Run {Restore}});$form.Controls.Add($restore)
-$backup=New-Object Windows.Forms.Button;$backup.Text='Open backup';$backup.SetBounds(435,65,120,30);$backup.Add_Click({Run {$p=Paths;Start-Process explorer.exe -ArgumentList ('"'+$p.state+'"')}});$form.Controls.Add($backup)
+$status=New-Object Windows.Forms.Label;$status.SetBounds(15,215,620,65);$status.Text='Choose features, then Install or Play. Changes apply after restarting CS2.';$form.Controls.Add($status)
+$install=New-Object Windows.Forms.Button;$install.Text='Install';$install.SetBounds(15,170,120,30);$install.Add_Click({Run {Install}});$form.Controls.Add($install)
+$play=New-Object Windows.Forms.Button;$play.Text='Play (-insecure)';$play.SetBounds(145,170,150,30);$play.Add_Click({Run {Closed;if(!(Get-Process steam -ErrorAction SilentlyContinue)){throw 'Start Steam first.'};Install;$p=Paths;$script:LaunchedGame=Start-Process -FilePath (Join-Path $p.root 'game\bin\win64\cs2.exe') -ArgumentList '-insecure' -WorkingDirectory $p.root -PassThru;$status.Text='Closing this launcher closes its game and restores originals.'}});$form.Controls.Add($play)
+$restore=New-Object Windows.Forms.Button;$restore.Text='Restore';$restore.SetBounds(305,170,120,30);$restore.Add_Click({Run {Restore}});$form.Controls.Add($restore)
+$backup=New-Object Windows.Forms.Button;$backup.Text='Open backup';$backup.SetBounds(435,170,120,30);$backup.Add_Click({Run {$p=Paths;Start-Process explorer.exe -ArgumentList ('"'+$p.state+'"')}});$form.Controls.Add($backup)
+$row=0
+foreach($entry in @(@(3,'Swap radar, telemetry and kill feed'),@(4,'Team selection: CT left / T right'))){
+ $box=New-Object Windows.Forms.CheckBox;$box.Text=$entry[1];$box.SetBounds(15,(58+32*$row),610,28);$box.Checked=($script:FeatureMask -band $entry[0]) -ne 0
+ $script:FeatureBoxes[[int]$entry[0]]=$box;$form.Controls.Add($box);$row++
+}
 $form.Add_FormClosing({param($sender,$eventArgs)
- try{CloseSession}catch{$eventArgs.Cancel=$true;[Windows.Forms.MessageBox]::Show("Could not restore originals: "+$_.Exception.Message+"`nClose any separately launched CS2 instance, then try closing again.",'CS2 HUD Layout') | Out-Null}
+ try{SaveFeatures;CloseSession}catch{$eventArgs.Cancel=$true;[Windows.Forms.MessageBox]::Show("Could not restore originals: "+$_.Exception.Message+"`nClose any separately launched CS2 instance, then try closing again.",'CS2 HUD Layout') | Out-Null}
 })
 if($TestInstallButton){$form.Add_Shown({$install.PerformClick();Write-Output ("Install button result: "+$status.Text);$form.Close()})}
 [Windows.Forms.Application]::EnableVisualStyles()

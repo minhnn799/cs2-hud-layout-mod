@@ -13,7 +13,10 @@ a='<CSGOHudRadar id="HudRadar" />';b='<CSGOHudDeathNotice id="HudDeathNotice" />
 assert s.count(a)==s.count(b)==1
 s=s.replace(a,'__SWAP__').replace(b,a).replace('__SWAP__',b)
 files['layout/hud/hud.vxml']=s
-files['styles/hud/hudradar.vcss']=(base/'styles/hud/hudradar.css').read_text()+'\n/* Standalone HUD layout */\n.hud-radar { horizontal-align: right; }\n'
+radar=(base/'layout/hud/hudradar.xml').read_text()
+radar=radar.replace('<Panel>\n\t\t\t<Panel class="hrBotrad additive"', '<Panel style="width: 100%;">\n\t\t\t<Panel class="hrBotrad additive"')
+files['layout/hud/hudradar.vxml']=radar
+files['styles/hud/hudradar.vcss']=(base/'styles/hud/hudradar.css').read_text()+'\n/* Standalone HUD layout */\n.hud-radar { horizontal-align: right; }\n#DashboardLabel { width: 100%; horizontal-align: center; text-align: center; margin-left: 0px; margin-right: 0px; }\n'
 files['styles/hud/huddeathnotice.vcss']=(base/'styles/hud/huddeathnotice.css').read_text()+'''\n/* Standalone HUD layout */
 CSGOHudDeathNotice { horizontal-align: left; height: fit-children; margin-top: 72px; padding-right: 0px; padding-left: 10px; }
 #VisibleNotices { horizontal-align: left; height: fit-children; }
@@ -61,20 +64,31 @@ for rel,s in files.items():
  (R/'build'/ (p.name+'.log')).write_text(result.stdout+result.stderr)
  if result.returncode or not (out/'panorama'/(rel+'_c')).is_file():raise RuntimeError('Compile failed: '+rel)
 # VPK v2, embedded archive, CRC per entry and package MD5 integrity block.
-tree=bytearray();data=bytearray()
-paths=[out/'panorama'/(rel+'_c') for rel in files]
-for ext in sorted({p.suffix[1:] for p in paths}):
- tree.extend(ext.encode()+b'\0')
- for folder in sorted({p.parent.relative_to(out).as_posix() for p in paths if p.suffix[1:]==ext}):
-  tree.extend(folder.encode()+b'\0')
-  for p in sorted(p for p in paths if p.suffix[1:]==ext and p.parent.relative_to(out).as_posix()==folder):
-   raw=p.read_bytes();tree.extend(p.stem.encode()+b'\0');tree.extend(struct.pack('<IHHIIH',zlib.crc32(raw),0,0x7fff,len(data),len(raw),0xffff));data.extend(raw)
+def pack(paths, destination):
+ tree=bytearray();data=bytearray()
+ for ext in sorted({p.suffix[1:] for p in paths}):
+  tree.extend(ext.encode()+b'\0')
+  for folder in sorted({p.parent.relative_to(out).as_posix() for p in paths if p.suffix[1:]==ext}):
+   tree.extend(folder.encode()+b'\0')
+   for p in sorted(p for p in paths if p.suffix[1:]==ext and p.parent.relative_to(out).as_posix()==folder):
+    raw=p.read_bytes();tree.extend(p.stem.encode()+b'\0');tree.extend(struct.pack('<IHHIIH',zlib.crc32(raw),0,0x7fff,len(data),len(raw),0xffff));data.extend(raw)
+   tree.extend(b'\0')
   tree.extend(b'\0')
  tree.extend(b'\0')
-tree.extend(b'\0')
-packed=struct.pack('<7I',0x55aa1234,2,len(tree),len(data),0,48,0)+tree+data
-packed+=hashlib.md5(tree).digest()+hashlib.md5(b'').digest()
-packed+=hashlib.md5(packed).digest()
-(R/'hud_layout.vpk').write_bytes(packed)
+ packed=struct.pack('<7I',0x55aa1234,2,len(tree),len(data),0,48,0)+tree+data
+ packed+=hashlib.md5(tree).digest()+hashlib.md5(b'').digest()
+ packed+=hashlib.md5(packed).digest()
+ destination.write_bytes(packed)
+paths=[out/'panorama'/(rel+'_c') for rel in files]
+pack(paths,R/'hud_layout.vpk')
+profiles=R/'profiles';profiles.mkdir(exist_ok=True)
+for mask in range(1,8):
+ selected=[]
+ for rel in files:
+  bit=4 if 'teamselectmenu' in rel else 2 if ('perfstats' in rel or 'telemetry' in rel) else 1
+  if mask & bit:selected.append(out/'panorama'/(rel+'_c'))
+ destination=profiles/f'{mask}.vpk'
+ pack(selected,destination)
+ destination.with_suffix('.sha256').write_text(hashlib.sha256(destination.read_bytes()).hexdigest())
 (R/'build/manifest.json').write_text(json.dumps({p.relative_to(out).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in paths},indent=2))
 print('Compiled and packed',len(files),'UI resources:',R/'hud_layout.vpk')
